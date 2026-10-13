@@ -1,6 +1,5 @@
-# Antigravity Office Viewer 📄📊📽️
-
-Google Antigravity 内部 Office (Word / Excel / PowerPoint) 文档预览扩展，通过 **Proxy DLL 静默加载 + CDP 原生挂载** 实现即放即用。
+# Antigravity Office Viewer 
+Google Antigravity Office (Word / Excel / PowerPoint) 文档预览扩展，通过 **Proxy DLL 静默加载 + CDP 原生挂载** 实现。
 
 ---
 
@@ -14,13 +13,13 @@ Google Antigravity 内部 Office (Word / Excel / PowerPoint) 文档预览扩展�
 ---
 
 ### Excel (`.xlsx`) 预览
-> 支持多工作表切换，保留表格样式
+> 多工作表切换，保留表格样式
 
 
 ---
 
 ### PowerPoint (`.pptx`) 预览
-> 瀑布流排布，保留样式
+> 瀑布流排布，保留布局样式
 
 
 ---
