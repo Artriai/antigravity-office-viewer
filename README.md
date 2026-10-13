@@ -1,29 +1,27 @@
 # Antigravity Office Viewer 📄📊📽️
 
-Google Antigravity 原生 Office (Word / Excel / PowerPoint) 文档预览扩展。无需手动开命令窗口，通过 **Proxy DLL 静默加载 + CDP 原生挂载** 实现即放即用。
+Google Antigravity 内部 Office (Word / Excel / PowerPoint) 文档预览扩展，通过 **Proxy DLL 静默加载 + CDP 原生挂载** 实现即放即用。
 
 ---
 
 ## 📸 预览截图 (Screenshots)
 
 ### Word (`.docx`) 预览
-> 纯净正文排版，保留标题、段落、表格与样式，移除编辑工具栏。
+> 正确排版，保留标题、段落格式
 
-![Word Preview](screenshots/word_preview.png)
+
 
 ---
 
 ### Excel (`.xlsx`) 预览
-> 支持多工作表（Sheet Tabs）切换，高保真网格，移除公式栏与只读警告横幅。
+> 支持多工作表切换，保留表格样式
 
-![Excel Preview](screenshots/excel_preview.png)
 
 ---
 
 ### PowerPoint (`.pptx`) 预览
-> 纯白背景（`#ffffff`），1440×810 高清画质，自上而下瀑布流连续排布，移除侧边栏。
+> 瀑布流排布，保留样式
 
-![PPT Preview](screenshots/ppt_preview.png)
 
 ---
 
