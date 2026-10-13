@@ -19,31 +19,34 @@ DWORD WINAPI WorkerThread(LPVOID lpParam) {
     si.wShowWindow = SW_HIDE;
     ZeroMemory(&pi, sizeof(pi));
 
-    WCHAR userProfile[MAX_PATH];
     WCHAR targetScript[MAX_PATH] = {0};
 
-    if (GetEnvironmentVariableW(L"USERPROFILE", userProfile, MAX_PATH) > 0) {
-        WCHAR p1[MAX_PATH];
-        wsprintfW(p1, L"%s\\.gemini\\antigravity\\scratch\\antigravity-office-viewer\\index.js", userProfile);
-        if (GetFileAttributesW(p1) != INVALID_FILE_ATTRIBUTES) {
-            wcscpy(targetScript, p1);
-        } else {
-            WCHAR p2[MAX_PATH];
-            wsprintfW(p2, L"%s\\.gemini\\antigravity\\office-hook\\office_cdp_hook.js", userProfile);
-            if (GetFileAttributesW(p2) != INVALID_FILE_ATTRIBUTES) {
-                wcscpy(targetScript, p2);
+    // 1. Priority 1: Check office-viewer\\index.js in the same directory as Antigravity.exe
+    WCHAR appScript[MAX_PATH];
+    if (GetModuleFileNameW(NULL, appScript, MAX_PATH) > 0) {
+        WCHAR* lastSlash = wcsrchr(appScript, L'\\');
+        if (lastSlash) {
+            wcscpy(lastSlash + 1, L"office-viewer\\index.js");
+            if (GetFileAttributesW(appScript) != INVALID_FILE_ATTRIBUTES) {
+                wcscpy(targetScript, appScript);
             }
         }
     }
 
+    // 2. Priority 2: Fallback to USERPROFILE directories
     if (targetScript[0] == L'\0') {
-        WCHAR p3[MAX_PATH];
-        GetModuleFileNameW(NULL, p3, MAX_PATH);
-        WCHAR* lastSlash = wcsrchr(p3, L'\\');
-        if (lastSlash) {
-            wcscpy(lastSlash + 1, L"antigravity-office-viewer\\index.js");
-            if (GetFileAttributesW(p3) != INVALID_FILE_ATTRIBUTES) {
-                wcscpy(targetScript, p3);
+        WCHAR userProfile[MAX_PATH];
+        if (GetEnvironmentVariableW(L"USERPROFILE", userProfile, MAX_PATH) > 0) {
+            WCHAR p1[MAX_PATH];
+            wsprintfW(p1, L"%s\\.gemini\\antigravity\\scratch\\antigravity-office-viewer\\index.js", userProfile);
+            if (GetFileAttributesW(p1) != INVALID_FILE_ATTRIBUTES) {
+                wcscpy(targetScript, p1);
+            } else {
+                WCHAR p2[MAX_PATH];
+                wsprintfW(p2, L"%s\\.gemini\\antigravity\\office-hook\\office_cdp_hook.js", userProfile);
+                if (GetFileAttributesW(p2) != INVALID_FILE_ATTRIBUTES) {
+                    wcscpy(targetScript, p2);
+                }
             }
         }
     }
