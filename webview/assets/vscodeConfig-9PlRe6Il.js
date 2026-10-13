@@ -1,0 +1,1 @@
+var e=null;function t(){if(e)return e;let t=document.getElementById(`office-configs`).getAttribute(`data-config`);return t==`{{configs}}`?null:(e=JSON.parse(t),e)}function n(t){e&&={...e,...t}}export{n,t};

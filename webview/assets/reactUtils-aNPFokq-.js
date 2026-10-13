@@ -1,0 +1,1 @@
+import{o as e}from"./rolldown-runtime-DAXXjFlN.js";import{n as t}from"./jsx-runtime-CBD9r_Rc.js";var n=e(t());function r(){let[e,t]=(0,n.useState)([0,0]);return(0,n.useLayoutEffect)(()=>{function e(){t([window.innerWidth,window.innerHeight])}return window.addEventListener(`resize`,e),e(),()=>window.removeEventListener(`resize`,e)},[]),e}export{r as t};
