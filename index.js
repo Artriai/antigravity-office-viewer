@@ -49,7 +49,7 @@ if (!WEBVIEW_DIR) {
 
 function normalizeFilePath(rawPath) {
   if (!rawPath) return '';
-  let p = decodeURIComponent(rawPath).replace(/^file:\/\/\/?/i, '');
+  let p = decodeURIComponent(rawPath).replace(/^file:[\\/]+/i, '');
   if (/^[a-zA-Z]\//.test(p)) {
     p = p.charAt(0) + ':' + p.slice(1);
   }
@@ -486,7 +486,7 @@ const INJECTION_SCRIPT = `
       if (activeTabId && activeTabId.startsWith('file__')) {
         let raw = activeTabId.slice(6);
         try { raw = decodeURIComponent(raw); } catch(e) {}
-        raw = raw.replace(/^file:\\/\\/\\/?/i, '');
+        raw = raw.replace(/^file:[\\/]+/i, '');
         if (/^[a-zA-Z]\\//.test(raw)) {
           raw = raw.charAt(0) + ':' + raw.slice(1);
         }
@@ -511,7 +511,7 @@ const INJECTION_SCRIPT = `
 
     let s = window.location.search || '';
     try { s = decodeURIComponent(decodeURIComponent(s)); } catch(e) {}
-    let m = s.match(/tab=file__(?:file:\\/\\/\\/?)?([a-zA-Z]:[^&]+)/i);
+    let m = s.match(/tab=file__(?:file:[\\/]+)?([a-zA-Z]:[^&]+)/i);
     if (m) {
       let p = m[1].replace(/\\//g, '\\\\');
       if (/\\.(docx|dotx|xlsx|xlsm|xls|csv|tsv|ods|pptx|ppt|pptm)$/i.test(p)) {
@@ -531,7 +531,10 @@ const INJECTION_SCRIPT = `
       return;
     }
 
-    const contentArea = rightPane.querySelector('.flex-grow.overflow-hidden') ||
+    // Content area strictly below the header (.shrink-0) and subheader/Artifact row
+    const editorArea = rightPane.querySelector('.flex-1.min-h-0');
+    const contentArea = editorArea ||
+                        rightPane.querySelector('.flex-grow.overflow-hidden') ||
                         rightPane.querySelector('.flex-grow') ||
                         rightPane;
 
@@ -601,7 +604,7 @@ const INJECTION_SCRIPT = `
           if (tabId.startsWith('file__')) {
             let p = tabId.slice(6);
             try { p = decodeURIComponent(p); } catch(e) {}
-            p = p.replace(/^file:\\/\\/\\/?/i, '').replace(/\\//g, '\\\\').toLowerCase();
+            p = p.replace(/^file:[\\/]+/i, '').replace(/\\//g, '\\\\').toLowerCase();
             if (/^[a-zA-Z]\\:/.test(p)) openKeys.add(p);
           }
           if (title) openKeys.add(title);
@@ -614,6 +617,14 @@ const INJECTION_SCRIPT = `
           }
         }
       }
+
+      // Auto-pin preview tabs so clicking files keeps them open as persistent coexisting tabs
+      const tabButtons = header.querySelectorAll('button[data-tab-id]');
+      tabButtons.forEach(btn => {
+        if (btn.querySelector('.italic') || btn.querySelector('[class*="italic"]')) {
+          btn.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+        }
+      });
     }
   }
 
