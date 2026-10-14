@@ -474,36 +474,40 @@ const INJECTION_SCRIPT = `
   const iframePool = window.__ag_office_iframe_pool || new Map();
   window.__ag_office_iframe_pool = iframePool;
 
+  function normalizeOfficePath(raw) {
+    if (!raw) return '';
+    try { raw = decodeURIComponent(decodeURIComponent(raw)); } catch(e) {}
+    raw = raw.replace(/^file:[\\/]+/gi, '').replace(/^file:\\\\+/gi, '').replace(/^file:/gi, '');
+    raw = raw.replace(/^[\\/]+/, '');
+    if (/^[a-zA-Z][\\/]/.test(raw)) {
+      raw = raw.charAt(0) + ':' + raw.slice(1);
+    }
+    return raw.replace(/\\//g, '\\\\').toLowerCase();
+  }
+
   function getActiveOfficePath(rightPane) {
-    const header = rightPane.querySelector('.shrink-0');
-    if (header) {
-      let activeTabId = header.getAttribute('data-active-tab-id');
-      const activeBtn = header.querySelector('button.bg-secondary[data-tab-id]');
-      if (activeBtn && activeBtn.getAttribute('data-tab-id')) {
-        activeTabId = activeBtn.getAttribute('data-tab-id');
-      }
+    const tabBtns = Array.from(rightPane.querySelectorAll('button[data-tab-id]'));
+    const activeBtn = tabBtns.find(b => b.classList.contains('bg-secondary') || b.className.includes('bg-secondary'));
 
-      if (activeTabId && activeTabId.startsWith('file__')) {
-        let raw = activeTabId.slice(6);
-        try { raw = decodeURIComponent(raw); } catch(e) {}
-        raw = raw.replace(/^file:[\\/]+/i, '');
-        if (/^[a-zA-Z]\\//.test(raw)) {
-          raw = raw.charAt(0) + ':' + raw.slice(1);
-        }
-        raw = raw.replace(/\\//g, '\\\\');
-        if (/\\.(docx|dotx|xlsx|xlsm|xls|csv|tsv|ods|pptx|ppt|pptm)$/i.test(raw)) {
-          return raw;
-        }
-      }
+    let tabId = activeBtn ? activeBtn.getAttribute('data-tab-id') : null;
+    if (!tabId) {
+      const header = rightPane.querySelector('[data-active-tab-id]');
+      if (header) tabId = header.getAttribute('data-active-tab-id');
+    }
 
-      if (activeBtn) {
-        const title = (activeBtn.getAttribute('title') || activeBtn.textContent || '').trim();
-        if (/\\.(docx|dotx|xlsx|xlsm|xls|csv|tsv|ods|pptx|ppt|pptm)$/i.test(title)) {
-          if (/^[a-zA-Z]:\\\\/i.test(title)) return title;
-          for (const knownPath of iframePool.keys()) {
-            if (knownPath.toLowerCase().endsWith('\\\\' + title.toLowerCase())) {
-              return knownPath;
-            }
+    if (tabId && tabId.startsWith('file__')) {
+      const normalized = normalizeOfficePath(tabId.slice(6));
+      if (/\\.(docx|dotx|xlsx|xlsm|xls|csv|tsv|ods|pptx|ppt|pptm)$/i.test(normalized)) {
+        return normalized;
+      }
+    }
+
+    if (activeBtn) {
+      const title = (activeBtn.getAttribute('title') || activeBtn.textContent || '').trim();
+      if (/\\.(docx|dotx|xlsx|xlsm|xls|csv|tsv|ods|pptx|ppt|pptm)$/i.test(title)) {
+        for (const knownPath of iframePool.keys()) {
+          if (knownPath.endsWith('\\\\' + title.toLowerCase())) {
+            return knownPath;
           }
         }
       }
@@ -513,13 +517,25 @@ const INJECTION_SCRIPT = `
     try { s = decodeURIComponent(decodeURIComponent(s)); } catch(e) {}
     let m = s.match(/tab=file__(?:file:[\\/]+)?([a-zA-Z]:[^&]+)/i);
     if (m) {
-      let p = m[1].replace(/\\//g, '\\\\');
-      if (/\\.(docx|dotx|xlsx|xlsm|xls|csv|tsv|ods|pptx|ppt|pptm)$/i.test(p)) {
-        return p;
+      const normalized = normalizeOfficePath(m[1]);
+      if (/\\.(docx|dotx|xlsx|xlsm|xls|csv|tsv|ods|pptx|ppt|pptm)$/i.test(normalized)) {
+        return normalized;
       }
     }
 
     return null;
+  }
+
+  function getEditorCell(rightPane) {
+    const subbar = rightPane.querySelector('[class*="group/file-row"]');
+    if (!subbar) return null;
+    const body = subbar.nextElementSibling;
+    if (!body) return null;
+    const splitContainer = body.querySelector('[style*="container-type: size"]');
+    if (splitContainer && splitContainer.firstElementChild) {
+      return splitContainer.firstElementChild;
+    }
+    return body;
   }
 
   function tick() {
@@ -531,49 +547,53 @@ const INJECTION_SCRIPT = `
       return;
     }
 
-    // Content area strictly below the header (.shrink-0) and subheader/Artifact row
-    const editorArea = rightPane.querySelector('.flex-1.min-h-0');
-    const contentArea = editorArea ||
-                        rightPane.querySelector('.flex-grow.overflow-hidden') ||
-                        rightPane.querySelector('.flex-grow') ||
-                        rightPane;
+    const normKey = getActiveOfficePath(rightPane);
 
-    const filePath = getActiveOfficePath(rightPane);
+    if (normKey) {
+      const targetCell = getEditorCell(rightPane);
+      if (!targetCell) return;
 
-    if (filePath) {
-      if (contentArea !== rightPane) {
-        contentArea.style.position = 'relative';
+      if (getComputedStyle(targetCell).position === 'static') {
+        targetCell.style.position = 'relative';
       }
 
-      if (!overlay || overlay.parentElement !== contentArea) {
-        if (overlay) overlay.remove();
+      if (!overlay) {
         overlay = document.createElement('div');
         overlay.id = 'ag-office-container-v6';
-        overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;width:100%;height:100%;z-index:45;overflow:hidden;';
-        contentArea.appendChild(overlay);
+        targetCell.appendChild(overlay);
+      } else if (overlay.parentElement !== targetCell) {
+        targetCell.appendChild(overlay);
       }
 
+      overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:20;overflow:hidden;';
       overlay.style.display = 'block';
 
-      const normKey = filePath.toLowerCase().replace(/\\//g, '\\\\');
       const isPpt = normKey.endsWith('.pptx') || normKey.endsWith('.ppt') || normKey.endsWith('.pptm');
-
       overlay.style.background = isPpt ? '#ffffff' : 'var(--background, #1e1e1e)';
 
-      if (!iframePool.has(normKey)) {
-        const iframe = document.createElement('iframe');
+      // Clean up any stale keys from iframePool that start with 'file:'
+      for (const k of Array.from(iframePool.keys())) {
+        if (k.startsWith('file:') || k.startsWith('file\\\\')) {
+          const oldIfr = iframePool.get(k);
+          if (oldIfr) oldIfr.remove();
+          iframePool.delete(k);
+        }
+      }
+
+      let iframe = iframePool.get(normKey);
+      if (!iframe) {
+        iframe = document.createElement('iframe');
         iframe.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;border:none;display:block;' +
           (isPpt ? 'background:#ffffff;' : 'background:var(--background, #1e1e1e);');
         iframe.src = 'http://127.0.0.1:${serverPort}?file=' + encodeURIComponent(normKey);
         overlay.appendChild(iframe);
         iframePool.set(normKey, iframe);
       } else {
-        const currentIframe = iframePool.get(normKey);
-        if (currentIframe.parentElement !== overlay) {
-          overlay.appendChild(currentIframe);
+        if (iframe.parentElement !== overlay) {
+          overlay.appendChild(iframe);
         }
-        if (currentIframe.style.display !== 'block') {
-          currentIframe.style.display = 'block';
+        if (iframe.style.display !== 'block') {
+          iframe.style.display = 'block';
         }
       }
 
@@ -582,6 +602,33 @@ const INJECTION_SCRIPT = `
           ifr.style.display = 'none';
         }
       }
+
+      const tabBtns = Array.from(rightPane.querySelectorAll('button[data-tab-id]'));
+      if (tabBtns.length > 0) {
+        const openKeys = new Set();
+        for (const btn of tabBtns) {
+          const tabId = btn.getAttribute('data-tab-id') || '';
+          if (tabId.startsWith('file__')) {
+            const p = normalizeOfficePath(tabId.slice(6));
+            if (p) openKeys.add(p);
+          }
+          const title = (btn.getAttribute('title') || btn.textContent || '').trim().toLowerCase();
+          if (title) openKeys.add(title);
+        }
+        for (const [key, ifr] of iframePool.entries()) {
+          const baseName = key.split('\\\\').pop().toLowerCase();
+          if (key !== normKey && !openKeys.has(key) && !openKeys.has(baseName)) {
+            ifr.remove();
+            iframePool.delete(key);
+          }
+        }
+      }
+
+      tabBtns.forEach(btn => {
+        if (btn.querySelector('.italic') || btn.querySelector('[class*="italic"]')) {
+          btn.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+        }
+      });
     } else {
       if (overlay && overlay.style.display !== 'none') {
         overlay.style.display = 'none';
@@ -591,40 +638,6 @@ const INJECTION_SCRIPT = `
           ifr.style.display = 'none';
         }
       }
-    }
-
-    const header = rightPane.querySelector('.shrink-0');
-    if (header) {
-      const openButtons = Array.from(header.querySelectorAll('button[data-tab-id], button[title]'));
-      if (openButtons.length > 0) {
-        const openKeys = new Set();
-        for (const btn of openButtons) {
-          const tabId = btn.getAttribute('data-tab-id') || '';
-          const title = (btn.getAttribute('title') || btn.textContent || '').trim().toLowerCase();
-          if (tabId.startsWith('file__')) {
-            let p = tabId.slice(6);
-            try { p = decodeURIComponent(p); } catch(e) {}
-            p = p.replace(/^file:[\\/]+/i, '').replace(/\\//g, '\\\\').toLowerCase();
-            if (/^[a-zA-Z]\\:/.test(p)) openKeys.add(p);
-          }
-          if (title) openKeys.add(title);
-        }
-        for (const [key, ifr] of iframePool.entries()) {
-          const baseName = key.split('\\\\').pop().toLowerCase();
-          if (!openKeys.has(key) && !openKeys.has(baseName)) {
-            ifr.remove();
-            iframePool.delete(key);
-          }
-        }
-      }
-
-      // Auto-pin preview tabs so clicking files keeps them open as persistent coexisting tabs
-      const tabButtons = header.querySelectorAll('button[data-tab-id]');
-      tabButtons.forEach(btn => {
-        if (btn.querySelector('.italic') || btn.querySelector('[class*="italic"]')) {
-          btn.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
-        }
-      });
     }
   }
 
@@ -641,7 +654,7 @@ const INJECTION_SCRIPT = `
     });
     window.addEventListener('popstate', () => setTimeout(tick, 0));
     document.addEventListener('click', (e) => {
-      if (e.target && e.target.closest && e.target.closest('.shrink-0')) {
+      if (e.target && e.target.closest && e.target.closest('button[data-tab-id]')) {
         setTimeout(tick, 0);
         setTimeout(tick, 40);
       }
