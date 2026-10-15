@@ -1,5 +1,5 @@
 const http = require('http');
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
@@ -200,6 +200,10 @@ function startPreviewServer() {
         .x-spreadsheet-toolbar,
         .x-spreadsheet-editor,
         .x-spreadsheet-sheet-image-toolbar {
+          display: none !important;
+        }
+        .x-spreadsheet-contextmenu .x-spreadsheet-item:not(.item-copy),
+        .x-spreadsheet-contextmenu .divider {
           display: none !important;
         }
         .excel-viewer {
@@ -416,6 +420,42 @@ function startPreviewServer() {
       }
     }
 
+    // 2.5 Clipboard API
+    if (pathname === '/api/clipboard') {
+      if (req.method === 'OPTIONS') {
+        res.writeHead(200, {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type'
+        });
+        res.end();
+        return;
+      }
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            if (data && typeof data.text === 'string') {
+              const proc = spawn('clip.exe', [], { stdio: ['pipe', 'ignore', 'ignore'] });
+              proc.stdin.write(data.text, 'utf8');
+              proc.stdin.end();
+            }
+            res.writeHead(200, {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*'
+            });
+            res.end(JSON.stringify({ ok: true }));
+          } catch(e) {
+            res.writeHead(500, { 'Access-Control-Allow-Origin': '*' });
+            res.end(e.message);
+          }
+        });
+        return;
+      }
+    }
+
     // 3. Static assets
     if (WEBVIEW_DIR) {
       const cleanPath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
@@ -583,6 +623,7 @@ const INJECTION_SCRIPT = `
       let iframe = iframePool.get(normKey);
       if (!iframe) {
         iframe = document.createElement('iframe');
+        iframe.setAttribute('allow', 'clipboard-read; clipboard-write');
         iframe.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;border:none;display:block;' +
           (isPpt ? 'background:#ffffff;' : 'background:var(--background, #1e1e1e);');
         iframe.src = 'http://127.0.0.1:${serverPort}?file=' + encodeURIComponent(normKey);
@@ -629,6 +670,14 @@ const INJECTION_SCRIPT = `
           btn.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
         }
       });
+
+      // Filter out invalid actions from subbar more-actions menu
+      document.querySelectorAll('[role="menuitem"]').forEach(item => {
+        const text = item.innerText.trim();
+        if (['Copy Content', 'Search', '复制内容', '搜索'].includes(text)) {
+          item.style.setProperty('display', 'none', 'important');
+        }
+      });
     } else {
       if (overlay && overlay.style.display !== 'none') {
         overlay.style.display = 'none';
@@ -638,6 +687,11 @@ const INJECTION_SCRIPT = `
           ifr.style.display = 'none';
         }
       }
+      document.querySelectorAll('[role="menuitem"]').forEach(item => {
+        if (item.style.display === 'none') {
+          item.style.removeProperty('display');
+        }
+      });
     }
   }
 
@@ -659,6 +713,35 @@ const INJECTION_SCRIPT = `
         setTimeout(tick, 40);
       }
     }, true);
+
+    window.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'ag_office_copy' && typeof e.data.text === 'string') {
+        try {
+          navigator.clipboard.writeText(e.data.text);
+        } catch(err) {}
+      }
+    });
+
+    const menuObserver = new MutationObserver((mutations) => {
+      const rightPane = document.querySelector('.relative.flex-1.flex.min-w-0.h-full');
+      if (!rightPane || !getActiveOfficePath(rightPane)) return;
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType === 1) {
+            const items = node.matches && node.matches('[role="menuitem"]')
+              ? [node]
+              : Array.from(node.querySelectorAll ? node.querySelectorAll('[role="menuitem"]') : []);
+            items.forEach(item => {
+              const text = item.innerText.trim();
+              if (['Copy Content', 'Search', '复制内容', '搜索'].includes(text)) {
+                item.style.setProperty('display', 'none', 'important');
+              }
+            });
+          }
+        }
+      }
+    });
+    menuObserver.observe(document.body, { childList: true, subtree: true });
   } catch(e) {}
 
   window.__ag_office_timer = setInterval(tick, 100);
