@@ -1,11 +1,14 @@
 {
   "name": "antigravity-office-viewer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Native-like high-performance Office document (Word, Excel, PowerPoint) viewer for Google Antigravity IDE",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "daemon": "node index.js --daemon"
+    "daemon": "node index.js --daemon",
+    "test": "node --test",
+    "status": "node index.js --status",
+    "stop": "node index.js --stop"
   },
   "keywords": [
     "antigravity",
@@ -17,5 +20,8 @@
     "preview"
   ],
   "author": "Artriai",
-  "license": "MIT"
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  }
 }

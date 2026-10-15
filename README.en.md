@@ -50,13 +50,13 @@ The second command should print `function`.
    git clone https://github.com/Artriai/antigravity-office-viewer.git
    ```
 
-2. Close Antigravity completely. If its installation folder contains a `winmm.dll` from another tool, back it up first: the installer overwrites that file.
+2. Close Antigravity completely. If its installation folder contains a `winmm.dll` from another tool, back it up and move it first: the installer refuses to overwrite an unrecognized DLL.
 3. Double-click **`start.bat`**. It checks the running process, registry, and default installation path. If detection fails, supply the installation folder or `Antigravity.exe` when prompted.
 4. Start Antigravity normally and open a `.docx`, `.xlsx`, or `.pptx` file. Allow a few seconds for the service to attach.
 
-The installer puts `winmm.dll` beside `Antigravity.exe` and copies `index.js`, `package.json`, and `webview/` into an `office-viewer/` subfolder. The default installation path is `%LOCALAPPDATA%\Programs\antigravity\`.
+The installer puts `winmm.dll` beside `Antigravity.exe` and copies `index.js`, `package.json`, `lib/`, `webview/`, and `manage.bat` into an `office-viewer/` subfolder. The default installation path is `%LOCALAPPDATA%\Programs\antigravity\`.
 
-**No `npm install` is needed**: the service uses Node.js built-in modules and includes the webview assets. To update, close Antigravity and stop the viewer service, then run `start.bat` from the updated repository.
+**No `npm install` is needed**: the service uses Node.js built-in modules and includes the webview assets. To update, close Antigravity and stop the viewer service, then run `start.bat` from the updated repository. The installer validates Node.js and copied assets, and attempts to restore the previous version if deployment fails.
 
 ## Troubleshooting
 
@@ -64,8 +64,8 @@ The installer puts `winmm.dll` beside `Antigravity.exe` and copies `index.js`, `
 | --- | --- |
 | Documents still show `PK...` text | Verify `winmm.dll` and `office-viewer/` are beside `Antigravity.exe`, then restart Antigravity completely. |
 | No preview appears | Check `node` is on `PATH` and `typeof WebSocket` returns `function`. Run the service manually to inspect logs. |
-| No `Discovered CDP port` or `Attached to` log | Confirm Antigravity exposes an accessible local CDP endpoint. Automatic discovery only finds an existing endpoint. |
-| `EADDRINUSE` | Default preview port `12399` is occupied. Check for an existing viewer process before starting another. |
+| No `Discovered CDP port` or `Attached to` log | Confirm Antigravity exposes an accessible local CDP endpoint. Discovery only uses ports owned by Antigravity processes and checks that a target page contains the editor. |
+| `EADDRINUSE` | Default preview port `12399` is occupied. New services reuse an existing instance. If the error persists, check for a legacy viewer or another application using the port. |
 | Blank preview or `webview directory not found` | Verify `office-viewer/webview/index.html` and its `assets/` directory were copied completely. |
 | DLL copy warning | Close all Antigravity processes and rerun `start.bat`. |
 | Stops working after an Antigravity update | Check the deployed files and reinstall if needed. Editor UI or CDP changes may require a code update. |
@@ -78,9 +78,20 @@ node index.js
 
 Keep the terminal open while testing; press `Ctrl+C` to stop. Logs show the webview directory, HTTP listener, discovered CDP port, and attached pages. The preview server binds to `127.0.0.1:12399` by default; set `OFFICE_VIEWER_PORT` in the service's environment to override the port.
 
+While the service is running, use these commands from the repository or deployed `office-viewer/` directory:
+
+```sh
+node index.js --status
+node index.js --stop
+```
+
+Double-click the deployed `manage.bat` for status, or run `manage.bat stop`. Daemon mode stops about 30 seconds after Antigravity exits; a foreground service keeps waiting for the application to restart. Legacy services do not support `--stop`; the installer can stop the matching legacy process during an upgrade.
+
+Set `OFFICE_VIEWER_CDP_PORT` to select a debugging port explicitly; it must still belong to Antigravity. Missing documents produce an error instead of falling back to namesakes in other folders.
+
 ## Uninstall
 
-1. Close Antigravity and stop the viewer's Node.js process. Identify it by the `office-viewer\index.js` command line; leave unrelated Node.js processes running.
+1. Close Antigravity and run `node index.js --stop`. For legacy services, identify the process by its `office-viewer\index.js` command line; leave unrelated Node.js processes running.
 2. Remove this project's `winmm.dll` and the `office-viewer/` subfolder from the Antigravity installation folder. Restore any DLL backed up before installation.
 3. Start Antigravity normally.
 
@@ -88,7 +99,10 @@ Keep the terminal open while testing; press `Ctrl+C` to stop. Logs show the webv
 
 | Path | Purpose |
 | --- | --- |
-| `start.bat` | Locates Antigravity and installs the loader, service, and assets |
+| `start.bat` / `scripts/install.ps1` | Checks the environment, locates Antigravity, and validates installation and updates |
+| `manage.bat` | Reports service status or stops the deployed service |
+| `lib/` | File path handling, CDP connections, and service management |
+| `test/` | HTTP, path, injection, lifecycle, and Windows installer regression tests |
 | `index.js` | Local HTTP server, CDP discovery, and editor preview integration |
 | `bin/winmm.dll` | Prebuilt Windows x64 proxy loader |
 | `src/loader/` | Loader C source, export definitions, and build script |
@@ -96,6 +110,8 @@ Keep the terminal open while testing; press `Ctrl+C` to stop. Logs show the webv
 | `screenshots/` | Preview images used in this README |
 
 To rebuild the loader on Windows, put an x64 MinGW-w64 GCC toolchain on `PATH` and run `src\loader\build_dll.bat`. It writes `bin\winmm.dll`. The repository includes compiled webview assets; it does not currently include a frontend source build workflow.
+
+Run `npm test` for regression checks. GitHub Actions runs Windows and Linux checks with Node.js 22 and 24; installer tests run only on Windows.
 
 ## Acknowledgments
 

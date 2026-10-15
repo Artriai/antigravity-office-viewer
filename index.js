@@ -1,10 +1,15 @@
 const http = require('http');
-const { execSync, spawn } = require('child_process');
+const { spawn } = require('child_process');
+const crypto = require('node:crypto');
+const { resolveDocument } = require('./lib/files');
+const { CdpController, getJson } = require('./lib/cdp');
+const { writeState, removeState, stopService } = require('./lib/service');
+const VERSION = require('./package.json').version;
 const path = require('path');
 const fs = require('fs');
 
 const DEFAULT_SERVER_PORT = 12399;
-const serverPort = parseInt(process.env.OFFICE_VIEWER_PORT || DEFAULT_SERVER_PORT, 10);
+const serverPort = Number(process.env.OFFICE_VIEWER_PORT || DEFAULT_SERVER_PORT);
 
 // Locate vscode-office webview directory
 function findVscodeOfficeWebviewDir() {
@@ -47,31 +52,6 @@ if (!WEBVIEW_DIR) {
   console.log('[Antigravity Office Viewer] Using webview engine from:', WEBVIEW_DIR);
 }
 
-function normalizeFilePath(rawPath) {
-  if (!rawPath) return '';
-  let p = decodeURIComponent(rawPath).replace(/^file:[\\/]+/i, '');
-  if (/^[a-zA-Z]\//.test(p)) {
-    p = p.charAt(0) + ':' + p.slice(1);
-  }
-  return p.replace(/\//g, '\\');
-}
-
-function resolveExistingFile(targetFile) {
-  if (targetFile && fs.existsSync(targetFile)) return targetFile;
-  const base = path.basename(targetFile);
-  const userProfile = process.env.USERPROFILE || process.env.HOME || '';
-  const candidates = [
-    path.join(userProfile, '.gemini', 'antigravity', 'scratch', base),
-    path.join(userProfile, 'Desktop', base),
-    path.join(userProfile, 'Downloads', base),
-    path.join(userProfile, 'Documents', base)
-  ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
-  }
-  return targetFile;
-}
-
 const MIME_TYPES = {
   '.js': 'application/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -87,20 +67,74 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon'
 };
 
-// Start Preview HTTP Server
-let previewServer = null;
-function startPreviewServer() {
-  if (previewServer) return;
+function sendError(res, status, message) {
+  if (res.headersSent) { res.destroy(); return; }
+  res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(message);
+}
 
-  previewServer = http.createServer((req, res) => {
-    const reqUrl = new URL(req.url, `http://localhost:${serverPort}`);
+function copyText(text) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('clip.exe', [], { windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] });
+    const timer = setTimeout(() => { proc.kill(); reject(new Error('Clipboard write timed out')); }, 5000);
+    const done = (error) => { clearTimeout(timer); error ? reject(error) : resolve(); };
+    proc.on('error', done);
+    proc.stdin.on('error', done);
+    proc.on('close', code => done(code === 0 ? null : new Error('Clipboard write failed')));
+    // clip.exe accepts UTF-16LE with a BOM, preserving Chinese text.
+    proc.stdin.end(Buffer.from('\ufeff' + text, 'utf16le'));
+  });
+}
+
+function createPreviewServer({ port = serverPort, token = crypto.randomBytes(32).toString('hex'), status = () => ({}), shutdown = () => {}, clipboard = copyText } = {}) {
+  const documents = new Map();
+  const documentIds = new Map();
+  function registerDocument(file) {
+    let id = documentIds.get(file);
+    if (!id) {
+      id = crypto.randomBytes(24).toString('hex');
+      if (documents.size >= 1024) {
+        const oldest = documents.keys().next().value;
+        documentIds.delete(documents.get(oldest));
+        documents.delete(oldest);
+      }
+      documents.set(id, file);
+      documentIds.set(file, id);
+    }
+    return id;
+  }
+  const previewServer = http.createServer((req, res) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    try {
+    const reqUrl = new URL(req.url, 'http://127.0.0.1');
     const pathname = reqUrl.pathname;
-
+    const localPort = previewServer.address()?.port || port;
+    const allowedOrigins = new Set([`http://127.0.0.1:${localPort}`, `http://localhost:${localPort}`]);
+    if (!allowedOrigins.has(`http://${req.headers.host}`)) { sendError(res, 403, 'Invalid host'); return; }
+    if (req.headers.origin && !allowedOrigins.has(req.headers.origin)) { sendError(res, 403, 'Origin not allowed'); return; }
+    const authorized = req.headers.authorization === `Bearer ${token}` || reqUrl.searchParams.get('token') === token;
+    if (pathname === '/health' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ service: 'antigravity-office-viewer', version: VERSION, ...status() }));
+      return;
+    }
+    if (pathname === '/api/shutdown') {
+      if (!authorized) { sendError(res, 403, 'Authentication required'); return; }
+      if (req.method !== 'POST') { sendError(res, 405, 'Use POST'); return; }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"ok":true}', () => shutdown());
+      return;
+    }
+    if (['/', '/index.html', '/api/clipboard'].includes(pathname) && !authorized) {
+      sendError(res, 403, 'Authentication required'); return;
+    }
     // 1. Root / index.html
     if (pathname === '/' || pathname === '/index.html') {
       const rawFile = reqUrl.searchParams.get('file') || '';
-      let targetFile = normalizeFilePath(rawFile);
-      targetFile = resolveExistingFile(targetFile);
+      if (req.method !== 'GET') { sendError(res, 405, 'Use GET'); return; }
+      const targetFile = resolveDocument(rawFile);
+      const documentId = registerDocument(targetFile);
       const ext = path.extname(targetFile).toLowerCase();
 
       let route = 'word';
@@ -335,7 +369,19 @@ function startPreviewServer() {
       <script>
       (function() {
         const urlParams = new URLSearchParams(window.location.search);
-        const targetFile = urlParams.get('file');
+        const targetFile = ${JSON.stringify(targetFile).replace(/</g, '\\u003c')};
+        const documentId = ${JSON.stringify(documentId)};
+        const sessionToken = ${JSON.stringify(token)};
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = function(input, init) {
+          const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+          if (url.origin === location.origin && url.pathname === '/api/clipboard') {
+            const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
+            headers.set('Authorization', 'Bearer ' + sessionToken);
+            init = { ...init, headers };
+          }
+          return originalFetch(input, init);
+        };
 
         ${isPpt ? `
         try {
@@ -362,9 +408,9 @@ function startPreviewServer() {
                       type: 'open',
                       content: {
                         ext: fExt,
-                        path: '/api/raw?file=' + encodeURIComponent(targetFile),
+                        path: '/api/raw?id=' + documentId,
                         fileName: fName,
-                        documentCacheId: fName,
+                        documentCacheId: ${JSON.stringify(targetFile + ':' + fs.statSync(targetFile).mtimeMs).replace(/</g, '\\u003c')},
                         readOnly: true
                       }
                     }, '*');
@@ -387,80 +433,59 @@ function startPreviewServer() {
       `;
 
       html = html.replace('</head>', injection + '</head>');
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(html);
       return;
     }
 
-    // 2. Binary stream
     if (pathname === '/api/raw') {
-      const rawFile = reqUrl.searchParams.get('file');
-      let targetFile = normalizeFilePath(rawFile);
-      targetFile = resolveExistingFile(targetFile);
-
-      if (targetFile && fs.existsSync(targetFile)) {
-        try {
-          const stat = fs.statSync(targetFile);
-          res.writeHead(200, {
-            'Content-Type': 'application/octet-stream',
-            'Content-Length': stat.size,
-            'Access-Control-Allow-Origin': '*'
-          });
-          fs.createReadStream(targetFile).pipe(res);
-          return;
-        } catch (e) {
-          res.writeHead(500);
-          res.end(e.message);
-          return;
-        }
-      } else {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('File not found: ' + targetFile);
-        return;
-      }
+      if (req.method !== 'GET') { sendError(res, 405, 'Use GET'); return; }
+      const targetFile = documents.get(reqUrl.searchParams.get('id'));
+      if (!targetFile) { sendError(res, 403, 'Unknown document'); return; }
+      const stat = fs.statSync(targetFile);
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': stat.size, 'Cache-Control': 'no-store' });
+      const stream = fs.createReadStream(targetFile);
+      stream.on('error', () => res.destroy());
+      res.on('close', () => stream.destroy());
+      stream.pipe(res);
+      return;
     }
-
-    // 2.5 Clipboard API
     if (pathname === '/api/clipboard') {
-      if (req.method === 'OPTIONS') {
-        res.writeHead(200, {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type'
-        });
-        res.end();
-        return;
-      }
-      if (req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', () => {
-          try {
-            const data = JSON.parse(body);
-            if (data && typeof data.text === 'string') {
-              const proc = spawn('clip.exe', [], { stdio: ['pipe', 'ignore', 'ignore'] });
-              proc.stdin.write(data.text, 'utf8');
-              proc.stdin.end();
-            }
-            res.writeHead(200, {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*'
-            });
-            res.end(JSON.stringify({ ok: true }));
-          } catch(e) {
-            res.writeHead(500, { 'Access-Control-Allow-Origin': '*' });
-            res.end(e.message);
-          }
-        });
-        return;
-      }
+      if (req.method !== 'POST') { sendError(res, 405, 'Use POST'); return; }
+      let size = 0;
+      const chunks = [];
+      let tooLarge = false;
+      req.on('error', () => { if (!res.writableEnded) sendError(res, 400, 'Invalid request body'); });
+      req.on('data', chunk => {
+        size += chunk.length;
+        if (size > 1024 * 1024) {
+          if (!tooLarge) sendError(res, 413, 'Clipboard text is too large');
+          tooLarge = true;
+          chunks.length = 0;
+        } else if (!tooLarge) chunks.push(chunk);
+      });
+      req.on('end', async () => {
+        if (tooLarge) return;
+        try {
+          const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          if (typeof data.text !== 'string') { sendError(res, 400, 'Text is required'); return; }
+          await clipboard(data.text);
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          res.end('{"ok":true}');
+        } catch (error) { sendError(res, error instanceof SyntaxError ? 400 : 500, 'Clipboard write failed'); }
+      });
+      return;
     }
-
     // 3. Static assets
     if (WEBVIEW_DIR) {
-      const cleanPath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
-      const assetPath = path.join(WEBVIEW_DIR, cleanPath);
+      if (req.method !== 'GET') { sendError(res, 405, 'Use GET'); return; }
+      const cleanPath = decodeURIComponent(pathname);
+      const assetPath = path.resolve(WEBVIEW_DIR, '.' + cleanPath);
+      const relative = path.relative(WEBVIEW_DIR, assetPath);
+      if (relative.startsWith('..') || path.isAbsolute(relative)) { sendError(res, 403, 'Invalid asset path'); return; }
       if (fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()) {
+        const realRelative = path.relative(fs.realpathSync(WEBVIEW_DIR), fs.realpathSync(assetPath));
+        if (realRelative.startsWith('..') || path.isAbsolute(realRelative)) { sendError(res, 403, 'Invalid asset path'); return; }
         const ext = path.extname(assetPath).toLowerCase();
         const mime = MIME_TYPES[ext] || 'application/octet-stream';
 
@@ -469,7 +494,7 @@ function startPreviewServer() {
           js = js.replace('ad=192,od=108', 'ad=1440,od=810');
           res.writeHead(200, {
             'Content-Type': 'application/javascript; charset=utf-8',
-            'Access-Control-Allow-Origin': '*'
+            'Cache-Control': 'no-cache'
           });
           res.end(js);
           return;
@@ -477,30 +502,49 @@ function startPreviewServer() {
 
         res.writeHead(200, {
           'Content-Type': mime,
-          'Access-Control-Allow-Origin': '*'
+          'Cache-Control': 'no-cache'
         });
-        fs.createReadStream(assetPath).pipe(res);
+        const stream = fs.createReadStream(assetPath);
+        stream.on('error', () => res.destroy());
+        res.on('close', () => stream.destroy());
+        stream.pipe(res);
         return;
       }
     }
 
-    res.writeHead(404);
-    res.end('Not found: ' + pathname);
+    sendError(res, 404, 'Not found');
+    } catch (error) {
+      const status = error.status || (['ENOENT', 'ENOTDIR'].includes(error.code) ? 404 : error instanceof URIError ? 400 : error.code === 'EACCES' ? 403 : 500);
+      sendError(res, status, status === 404 ? 'Document or resource not found' : status === 500 ? 'Unable to load document or resource' : error.message);
+    }
   });
-
-  previewServer.on('error', (err) => {
-    console.error('[Antigravity Office Viewer] Server error:', err.message);
-  });
-  previewServer.listen(serverPort, '127.0.0.1', () => {
-    console.log(`[Antigravity Office Viewer] HTTP server listening on http://127.0.0.1:${serverPort}`);
-  });
+  return { server: previewServer, token };
 }
 
-startPreviewServer();
-
 // In-window interceptor script injected via CDP
-const INJECTION_SCRIPT = `
+function normalizeOfficePath(raw) {
+  if (!raw) return '';
+  for (let i = 0; i < 2 && !/^(?:file:|[a-z]:[\/]|\\)/i.test(raw); i++) {
+    try { const next = decodeURIComponent(raw); if (next === raw) break; raw = next; } catch { break; }
+  }
+  if (/^file:/i.test(raw)) {
+    try {
+      const url = new URL(raw);
+      raw = decodeURIComponent(url.pathname);
+      if (url.hostname && url.hostname !== 'localhost') raw = '\\\\' + url.hostname + raw;
+      else raw = raw.replace(/^\/([a-z]:)/i, '$1');
+    } catch { return ''; }
+  }
+  return raw.replace(/\//g, '\\');
+}
+
+function buildInjectionScript(serverPort, token) {
+return `
 (() => {
+  if (window.__ag_office_dispose) window.__ag_office_dispose();
+  const abort = new AbortController();
+  const pendingTimers = new Set();
+  const later = (fn, delay) => { const id = setTimeout(() => { pendingTimers.delete(id); fn(); }, delay); pendingTimers.add(id); };
   if (window.__ag_office_timer) {
     clearInterval(window.__ag_office_timer);
     window.__ag_office_timer = null;
@@ -511,19 +555,15 @@ const INJECTION_SCRIPT = `
 
   console.log('[Antigravity Office Viewer] Interceptor active.');
 
+  if (window.__ag_office_session !== '${token}') {
+    for (const frame of (window.__ag_office_iframe_pool || new Map()).values()) frame.remove();
+    window.__ag_office_iframe_pool = new Map();
+    window.__ag_office_session = '${token}';
+  }
   const iframePool = window.__ag_office_iframe_pool || new Map();
   window.__ag_office_iframe_pool = iframePool;
 
-  function normalizeOfficePath(raw) {
-    if (!raw) return '';
-    try { raw = decodeURIComponent(decodeURIComponent(raw)); } catch(e) {}
-    raw = raw.replace(/^file:[\\/]+/gi, '').replace(/^file:\\\\+/gi, '').replace(/^file:/gi, '');
-    raw = raw.replace(/^[\\/]+/, '');
-    if (/^[a-zA-Z][\\/]/.test(raw)) {
-      raw = raw.charAt(0) + ':' + raw.slice(1);
-    }
-    return raw.replace(/\\//g, '\\\\').toLowerCase();
-  }
+  const normalizeOfficePath = ${normalizeOfficePath.toString()};
 
   function getActiveOfficePath(rightPane) {
     const tabBtns = Array.from(rightPane.querySelectorAll('button[data-tab-id]'));
@@ -546,21 +586,17 @@ const INJECTION_SCRIPT = `
       const title = (activeBtn.getAttribute('title') || activeBtn.textContent || '').trim();
       if (/\\.(docx|dotx|xlsx|xlsm|xls|csv|tsv|ods|pptx|ppt|pptm)$/i.test(title)) {
         for (const knownPath of iframePool.keys()) {
-          if (knownPath.endsWith('\\\\' + title.toLowerCase())) {
+          if (knownPath.toLowerCase().endsWith('\\\\' + title.toLowerCase())) {
             return knownPath;
           }
         }
       }
     }
 
-    let s = window.location.search || '';
-    try { s = decodeURIComponent(decodeURIComponent(s)); } catch(e) {}
-    let m = s.match(/tab=file__(?:file:[\\/]+)?([a-zA-Z]:[^&]+)/i);
-    if (m) {
-      const normalized = normalizeOfficePath(m[1]);
-      if (/\\.(docx|dotx|xlsx|xlsm|xls|csv|tsv|ods|pptx|ppt|pptm)$/i.test(normalized)) {
-        return normalized;
-      }
+    const queryTab = new URLSearchParams(window.location.search || '').get('tab');
+    if (queryTab && queryTab.startsWith('file__')) {
+      const normalized = normalizeOfficePath(queryTab.slice(6));
+      if (/\\.(docx|dotx|xlsx|xlsm|xls|csv|tsv|ods|pptx|ppt|pptm)$/i.test(normalized)) return normalized;
     }
 
     return null;
@@ -626,7 +662,8 @@ const INJECTION_SCRIPT = `
         iframe.setAttribute('allow', 'clipboard-read; clipboard-write');
         iframe.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;border:none;display:block;' +
           (isPpt ? 'background:#ffffff;' : 'background:var(--background, #1e1e1e);');
-        iframe.src = 'http://127.0.0.1:${serverPort}?file=' + encodeURIComponent(normKey);
+        iframe.src = 'http://127.0.0.1:${serverPort}?token=${token}&file=' + encodeURIComponent(normKey);
+        iframe.title = 'Office document preview';
         overlay.appendChild(iframe);
         iframePool.set(normKey, iframe);
       } else {
@@ -695,34 +732,39 @@ const INJECTION_SCRIPT = `
     }
   }
 
+  const originalHistory = {};
+  const wrappedHistory = {};
+  let menuObserver;
   try {
     ['pushState', 'replaceState'].forEach(method => {
       const orig = history[method];
       if (orig) {
-        history[method] = function() {
+        originalHistory[method] = orig;
+        history[method] = wrappedHistory[method] = function() {
           const res = orig.apply(this, arguments);
-          setTimeout(tick, 0);
+          later(tick, 0);
           return res;
         };
       }
     });
-    window.addEventListener('popstate', () => setTimeout(tick, 0));
+    window.addEventListener('popstate', () => later(tick, 0), { signal: abort.signal });
     document.addEventListener('click', (e) => {
       if (e.target && e.target.closest && e.target.closest('button[data-tab-id]')) {
-        setTimeout(tick, 0);
-        setTimeout(tick, 40);
+        later(tick, 0);
+        later(tick, 40);
       }
-    }, true);
+    }, { capture: true, signal: abort.signal });
 
     window.addEventListener('message', (e) => {
-      if (e.data && e.data.type === 'ag_office_copy' && typeof e.data.text === 'string') {
+      const trusted = e.origin === 'http://127.0.0.1:${serverPort}' && [...iframePool.values()].some(frame => frame.style.display !== 'none' && frame.contentWindow === e.source);
+      if (trusted && e.data && e.data.type === 'ag_office_copy' && typeof e.data.text === 'string') {
         try {
-          navigator.clipboard.writeText(e.data.text);
+          navigator.clipboard.writeText(e.data.text).catch(() => {});
         } catch(err) {}
       }
-    });
+    }, { signal: abort.signal });
 
-    const menuObserver = new MutationObserver((mutations) => {
+    menuObserver = new MutationObserver((mutations) => {
       const rightPane = document.querySelector('.relative.flex-1.flex.min-w-0.h-full');
       if (!rightPane || !getActiveOfficePath(rightPane)) return;
       for (const m of mutations) {
@@ -744,133 +786,67 @@ const INJECTION_SCRIPT = `
     menuObserver.observe(document.body, { childList: true, subtree: true });
   } catch(e) {}
 
-  window.__ag_office_timer = setInterval(tick, 100);
+  window.__ag_office_dispose = () => {
+    abort.abort();
+    if (menuObserver) menuObserver.disconnect();
+    clearInterval(window.__ag_office_timer);
+    for (const timer of pendingTimers) clearTimeout(timer);
+    for (const method of Object.keys(originalHistory)) {
+      if (history[method] === wrappedHistory[method]) history[method] = originalHistory[method];
+    }
+  };
+  window.__ag_office_timer = setInterval(tick, 500);
   tick();
 })();
 `;
-
-let currentCdpPort = null;
-const activeConnections = new Map();
-
-async function checkPort(port) {
-  return new Promise((resolve) => {
-    const req = http.get(`http://127.0.0.1:${port}/json/version`, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        resolve(data.includes('webSocketDebuggerUrl') ? port : null);
-      });
-    });
-    req.on('error', () => resolve(null));
-    req.setTimeout(300, () => {
-      req.destroy();
-      resolve(null);
-    });
-  });
 }
 
-async function discoverCdpPort() {
+async function main() {
+  if (!Number.isInteger(serverPort) || serverPort < 1 || serverPort > 65535) throw new Error('OFFICE_VIEWER_PORT must be an integer between 1 and 65535');
+  if (process.argv.includes('--stop')) { await stopService(serverPort); return; }
+  if (process.argv.includes('--status')) {
+    const status = await getJson(serverPort, '/health');
+    if (status?.service !== 'antigravity-office-viewer') throw new Error('Viewer service is not running');
+    console.log(JSON.stringify(status, null, 2)); return;
+  }
+  if (typeof WebSocket !== 'function') throw new Error('Node.js 22 or later with built-in WebSocket support is required');
+  if (!WEBVIEW_DIR) throw new Error('Bundled webview resources are missing; reinstall the viewer');
+  let controller;
+  let pollTimer;
+  let stopping = false;
+  const close = () => {
+    if (stopping) return;
+    stopping = true;
+    clearInterval(pollTimer);
+    controller?.stop();
+    removeState(serverPort, token);
+    server.close();
+    server.closeAllConnections();
+  };
+  const { server, token } = createPreviewServer({ shutdown: close, status: () => ({ cdpPort: controller?.port || null, attachedPages: controller?.attachedPages || 0 }) });
   try {
-    const netstat = execSync('netstat -ano -p tcp', { encoding: 'utf-8', timeout: 3000 });
-    const lines = netstat.split('\n');
-    const candidatePorts = [];
-    for (const line of lines) {
-      if (line.includes('LISTENING') && line.includes('127.0.0.1:')) {
-        const match = line.match(/127\.0\.0\.1:(\d+)/);
-        if (match) {
-          candidatePorts.push(parseInt(match[1]));
-        }
-      }
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(serverPort, '127.0.0.1', resolve); });
+  } catch (error) {
+    if (error.code === 'EADDRINUSE') {
+      const existing = await getJson(serverPort, '/health');
+      if (existing?.service === 'antigravity-office-viewer') { console.log('[Antigravity Office Viewer] Service already running.'); return; }
     }
-
-    for (const p of [...new Set(candidatePorts)]) {
-      const found = await checkPort(p);
-      if (found) {
-        return found;
-      }
-    }
-  } catch (e) {}
-  return null;
-}
-
-async function getPageTargets(port) {
-  return new Promise((resolve) => {
-    const req = http.get(`http://127.0.0.1:${port}/json/list`, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const list = JSON.parse(data);
-          resolve(list.filter(t => t.type === 'page'));
-        } catch (e) {
-          resolve([]);
-        }
-      });
-    });
-    req.on('error', () => resolve([]));
-    req.setTimeout(1200, () => {
-      req.destroy();
-      resolve([]);
-    });
-  });
-}
-
-function connectToPage(page) {
+    throw error;
+  }
   try {
-    const ws = new WebSocket(page.webSocketDebuggerUrl);
-    activeConnections.set(page.id, ws);
-
-    ws.onopen = () => {
-      console.log(`[Antigravity Office Viewer] Attached to: ${page.title}`);
-      
-      ws.send(JSON.stringify({ id: 1, method: 'Page.enable' }));
-      ws.send(JSON.stringify({
-        id: 2,
-        method: 'Page.addScriptToEvaluateOnNewDocument',
-        params: { source: INJECTION_SCRIPT }
-      }));
-      ws.send(JSON.stringify({
-        id: 3,
-        method: 'Runtime.evaluate',
-        params: { expression: INJECTION_SCRIPT }
-      }));
-    };
-
-    ws.onclose = () => {
-      activeConnections.delete(page.id);
-    };
-
-    ws.onerror = () => {
-      activeConnections.delete(page.id);
-    };
-  } catch (e) {
-    activeConnections.delete(page.id);
-  }
+    writeState(serverPort, token);
+    const requestedPort = process.env.OFFICE_VIEWER_CDP_PORT ? Number(process.env.OFFICE_VIEWER_CDP_PORT) : null;
+    if (requestedPort !== null && (!Number.isInteger(requestedPort) || requestedPort < 1 || requestedPort > 65535)) throw new Error('Invalid OFFICE_VIEWER_CDP_PORT');
+    controller = new CdpController({ script: buildInjectionScript(serverPort, token), requestedPort, onHostGone: process.argv.includes('--daemon') ? close : () => {} });
+    pollTimer = setInterval(() => controller.poll(), 3000);
+    controller.poll();
+    process.once('SIGINT', close);
+    process.once('SIGTERM', close);
+    server.on('error', error => { console.error(error.message); close(); });
+    console.log(`[Antigravity Office Viewer] HTTP server listening on http://127.0.0.1:${serverPort}`);
+    console.log('[Antigravity Office Viewer] Waiting for Antigravity CDP. Use --status or --stop to manage the service.');
+  } catch (error) { close(); throw error; }
 }
 
-async function poll() {
-  if (!currentCdpPort) {
-    currentCdpPort = await discoverCdpPort();
-    if (currentCdpPort) {
-      console.log(`[Antigravity Office Viewer] Discovered CDP port: ${currentCdpPort}`);
-    }
-  }
-
-  if (!currentCdpPort) return;
-
-  const pages = await getPageTargets(currentCdpPort);
-  if (pages.length === 0) {
-    currentCdpPort = null;
-    return;
-  }
-
-  for (const page of pages) {
-    if (!activeConnections.has(page.id)) {
-      connectToPage(page);
-    }
-  }
-}
-
-setInterval(poll, 1500);
-poll();
-console.log('[Antigravity Office Viewer] Daemon is running. Keep this terminal open or run in background.');
+if (require.main === module) main().catch(error => { console.error('[Antigravity Office Viewer]', error.message); process.exitCode = 1; });
+module.exports = { createPreviewServer, buildInjectionScript, normalizeOfficePath };
