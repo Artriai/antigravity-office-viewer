@@ -529,11 +529,23 @@ function normalizeOfficePath(raw) {
   }
   if (/^file:/i.test(raw)) {
     try {
-      const url = new URL(raw);
+      let normalizedUrl = raw;
+      if (/^file:\/{1,2}(?:[a-zA-Z]:|[a-zA-Z]%3A)/i.test(normalizedUrl)) {
+        normalizedUrl = normalizedUrl.replace(/^file:\/{1,2}/i, 'file:///');
+      } else if (/^file:[^/]/i.test(normalizedUrl)) {
+        normalizedUrl = normalizedUrl.replace(/^file:/i, 'file:///');
+      }
+      const url = new URL(normalizedUrl);
       raw = decodeURIComponent(url.pathname);
       if (url.hostname && url.hostname !== 'localhost') raw = '\\\\' + url.hostname + raw;
       else raw = raw.replace(/^\/([a-z]:)/i, '$1');
-    } catch { return ''; }
+    } catch {
+      try {
+        const stripped = decodeURIComponent(raw.replace(/^file:\/+/i, ''));
+        if (/^[a-zA-Z]:/i.test(stripped)) return stripped.replace(/\//g, '\\');
+      } catch {}
+      return '';
+    }
   }
   return raw.replace(/\//g, '\\');
 }
@@ -556,6 +568,8 @@ return `
   console.log('[Antigravity Office Viewer] Interceptor active.');
 
   if (window.__ag_office_session !== '${token}') {
+    const oldV6 = document.getElementById('ag-office-container-v6');
+    if (oldV6) oldV6.remove();
     for (const frame of (window.__ag_office_iframe_pool || new Map()).values()) frame.remove();
     window.__ag_office_iframe_pool = new Map();
     window.__ag_office_session = '${token}';
@@ -658,6 +672,16 @@ return `
 
       let iframe = iframePool.get(normKey);
       if (!iframe) {
+        for (const [k, v] of iframePool.entries()) {
+          if (k.toLowerCase() === normKey.toLowerCase()) {
+            iframe = v;
+            iframePool.delete(k);
+            iframePool.set(normKey, iframe);
+            break;
+          }
+        }
+      }
+      if (!iframe) {
         iframe = document.createElement('iframe');
         iframe.setAttribute('allow', 'clipboard-read; clipboard-write');
         iframe.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;border:none;display:block;' +
@@ -676,8 +700,16 @@ return `
       }
 
       for (const [key, ifr] of iframePool.entries()) {
-        if (key !== normKey && ifr.style.display !== 'none') {
+        if (key.toLowerCase() !== normKey.toLowerCase() && ifr.style.display !== 'none') {
           ifr.style.display = 'none';
+        }
+      }
+
+      if (typeof overlay.querySelectorAll === 'function') {
+        for (const child of Array.from(overlay.querySelectorAll('iframe'))) {
+          if (!Array.from(iframePool.values()).includes(child)) {
+            child.remove();
+          }
         }
       }
 
@@ -688,14 +720,18 @@ return `
           const tabId = btn.getAttribute('data-tab-id') || '';
           if (tabId.startsWith('file__')) {
             const p = normalizeOfficePath(tabId.slice(6));
-            if (p) openKeys.add(p);
+            if (p) {
+              openKeys.add(p);
+              openKeys.add(p.toLowerCase());
+            }
           }
           const title = (btn.getAttribute('title') || btn.textContent || '').trim().toLowerCase();
           if (title) openKeys.add(title);
         }
         for (const [key, ifr] of iframePool.entries()) {
           const baseName = key.split('\\\\').pop().toLowerCase();
-          if (key !== normKey && !openKeys.has(key) && !openKeys.has(baseName)) {
+          const keyLower = key.toLowerCase();
+          if (keyLower !== normKey.toLowerCase() && !openKeys.has(key) && !openKeys.has(keyLower) && !openKeys.has(baseName)) {
             ifr.remove();
             iframePool.delete(key);
           }

@@ -45,6 +45,10 @@ test('file URLs decode exactly once', async () => {
   const literal = String.raw`C:\docs\100% literal%20.docx`;
   assert.equal(normalizeOfficePath(literal), literal);
   assert.equal(normalizeOfficePath('file:///C:/docs/100%25%20literal%2520.docx'), literal);
+  assert.equal(normalizeOfficePath('file:/C:/docs/100%25%20literal%2520.docx'), literal);
+  assert.equal(normalizeOfficePath('file:/c%3A/docs/100%25%20literal%2520.docx'), literal.replace(/^C:/, 'c:'));
+  assert.equal(normalizeOfficePath('file://c%3A/docs/100%25%20literal%2520.docx'), literal.replace(/^C:/, 'c:'));
+  assert.equal(normalizeFilePath('file:/c%3A/docs/test.docx'), String.raw`c:\docs\test.docx`);
   assert.equal(normalizeOfficePath(encodeURIComponent(literal)), literal);
   assert.equal(normalizeOfficePath('file://server/share/report.docx'), String.raw`\\server\share\report.docx`);
 });
