@@ -1,75 +1,106 @@
 # Antigravity Office Viewer
 
-Seamless Word (`.docx`), Excel (`.xlsx`), and PowerPoint (`.pptx`) document preview for Google Antigravity.
+在 Google Antigravity 编辑区内直接预览 Word、Excel 和 PowerPoint 文档。
 
-[English](#english) | [中文说明](#中文说明)
+**简体中文** · [English](README.en.md)
 
----
+面向 Windows 的非官方集成工具，专注于文档阅读，内置预览资源，后台服务随 Antigravity 自动启动。
 
-<a name="english"></a>
-## English
+[效果展示](#效果展示) · [功能特性](#功能特性) · [安装使用](#安装使用) · [常见问题](#常见问题) · [卸载方法](#卸载方法) · [开发说明](#开发说明)
 
-Antigravity natively opens Office files (`.docx`, `.xlsx`, `.pptx`) as binary text files, showing raw `PK...` mojibake. **Antigravity Office Viewer** provides a native, beautiful, and zero-configuration office preview panel directly inside the editor pane.
+## 效果展示
 
-### Screenshots
+| Word · `.docx` | Excel · `.xlsx` | PowerPoint · `.pptx` |
+| --- | --- | --- |
+| [![Word 文档预览](screenshots/word_preview.png)](screenshots/word_preview.png) | [![Excel 表格预览](screenshots/excel_preview.png)](screenshots/excel_preview.png) | [![PowerPoint 演示文稿预览](screenshots/ppt_preview.png)](screenshots/ppt_preview.png) |
 
-#### Word (`.docx`)
-![Word Preview](screenshots/word_preview.png)
+点击图片查看大图。
 
-#### Excel (`.xlsx`)
-![Excel Preview](screenshots/excel_preview.png)
+## 功能特性
 
-#### PowerPoint (`.pptx`)
-![PowerPoint Preview](screenshots/ppt_preview.png)
+- **编辑区内预览**：直接阅读 Office 文档，避免以文本形式看到 `PK...` 二进制乱码。
+- **专注阅读**：隐藏编辑工具栏和无关控件；PowerPoint 采用纵向连续浏览布局。
+- **多文档切换**：复用各个已打开文档的预览框架，保留浏览状态，减少重复渲染。
+- **自动启动**：通过 `winmm.dll` 代理加载器启动 Node.js 服务，无需修改 `Antigravity.exe`。
 
-### Features
+主要预览格式为 `.docx`、`.xlsx` 和 `.pptx`。代码还会识别 `.dotx`、`.xlsm`、`.xls`、`.csv`、`.tsv`、`.ods`、`.ppt` 和 `.pptm`，但识别扩展名不代表保证渲染兼容。实际排版效果取决于内置渲染器及文档内容。
 
-- **Native Office Preview**: High-fidelity rendering for Word (`.docx`), Excel (`.xlsx`), and PowerPoint (`.pptx`).
-- **Clean Reading View**: Strips away distracting edit toolbars, banners, and redundant controls for a focused document experience.
-- **Instant Multi-Tab Switching**: Independent render pool preserves scroll state and allows 0ms instant tab switching.
-- **Non-Invasive & Safe**: Uses a standard `winmm.dll` proxy forwarder to silently launch the background viewer service when Antigravity opens. Zero modifications to Antigravity core executables.
+## 安装使用
 
-### Quick Install
+### 环境要求
 
-1. Clone or download this repository.
-2. Double-click **`start.bat`**.
-   > It automatically copies `winmm.dll` and the viewer service into `%LOCALAPPDATA%\Programs\antigravity\`.
-3. Restart **Antigravity**. You're all set!
+- **Windows x64**，并已安装 Google Antigravity。仓库附带的 DLL 为 x64，暂未提供 macOS、Linux 安装方案。
+- **Node.js 22 或更高版本**，且 `node` 已加入 `PATH`。服务依赖 Node.js 的[内置 WebSocket API](https://nodejs.org/docs/latest/api/globals.html#websocket)。
+- Antigravity 需提供可访问的本机 **CDP 调试端口**。服务会自动发现已有端口，但不会自行开启远程调试。
 
----
+在新终端中检查：
 
-<a name="中文说明"></a>
-## 中文说明
+```powershell
+node --version
+node -p "typeof WebSocket"
+```
 
-Google Antigravity 默认会将 Office 文件（`.docx` / `.xlsx` / `.pptx`）以纯文本打开，导致显示为 `PK...` 二进制乱码。**Antigravity Office Viewer** 通过无感扩展架构，在 Antigravity 主编辑区内直接提供高保真文档预览。
+第二条命令应输出 `function`。
 
-### 效果展示
+### 安装并打开文档
 
-#### Word (`.docx`) 预览
-![Word Preview](screenshots/word_preview.png)
+1. [下载仓库 ZIP](https://github.com/Artriai/antigravity-office-viewer/archive/refs/heads/main.zip) 并解压，或执行：
 
-#### Excel (`.xlsx`) 预览
-![Excel Preview](screenshots/excel_preview.png)
+   ```sh
+   git clone https://github.com/Artriai/antigravity-office-viewer.git
+   ```
 
-#### PowerPoint (`.pptx`) 预览
-![PowerPoint Preview](screenshots/ppt_preview.png)
+2. 完全退出 Antigravity。如果安装目录内已有其他工具的 `winmm.dll`，请先备份；安装脚本会覆盖同名文件。
+3. 双击 **`start.bat`**。脚本会通过运行进程、注册表或默认路径定位安装目录；识别失败时，按提示提供安装文件夹或 `Antigravity.exe` 的路径。
+4. 正常启动 Antigravity，打开 `.docx`、`.xlsx` 或 `.pptx` 文件，等待数秒让后台服务完成连接。
 
-### 核心特性
+脚本会将 `winmm.dll` 复制到 `Antigravity.exe` 所在目录，并将 `index.js`、`package.json` 和 `webview/` 部署到其下的 `office-viewer/` 文件夹。默认安装路径为 `%LOCALAPPDATA%\Programs\antigravity\`。
 
-- **原生 Office 渲染**：完美支持 Word、Excel、PPT 渲染与多标签页共存。
-- **纯净阅读体验**：自动过滤编辑工具栏、浮动横幅与无关按钮，呈现整洁排版。
-- **0ms 无感切页**：多文档独立渲染池，切换即刻响应并保留各文档浏览位置。
-- **安全非侵入**：采用系统级 `winmm.dll` 代理转发机制，随 Antigravity 启动静默拉起后台服务，不篡改原版核心安装包。
+**无需执行 `npm install`**：服务使用 Node.js 内置模块，仓库也已包含预览资源。更新时，先退出 Antigravity 并停止预览服务，再运行新版仓库中的 `start.bat`。
 
-### 一键安装
+## 常见问题
 
-1. 克隆或下载本仓库；
-2. 双击运行 **`start.bat`**；
-   > 脚本将自动将代理 DLL 与渲染模块部署至 `%LOCALAPPDATA%\Programs\antigravity\`。
-3. 重新打开 **Antigravity** 即可体验！
+| 现象 | 排查方法 |
+| --- | --- |
+| 打开文档仍显示 `PK...` 乱码 | 检查 `winmm.dll` 和 `office-viewer/` 是否位于 `Antigravity.exe` 所在目录，然后完全重启 Antigravity。 |
+| 没有出现预览 | 检查 `node` 是否在 `PATH` 中，且 `typeof WebSocket` 输出 `function`；手动启动服务查看日志。 |
+| 没有 `Discovered CDP port` 或 `Attached to` 日志 | 确认 Antigravity 已提供可访问的本机 CDP 端口；自动发现只能查找已有端口。 |
+| 出现 `EADDRINUSE` | 默认预览端口 `12399` 被占用，先检查是否已有预览服务运行，避免重复启动。 |
+| 预览空白或提示 `webview directory not found` | 检查 `office-viewer/webview/index.html` 及 `assets/` 目录是否完整复制。 |
+| 安装时提示 DLL 复制失败 | 关闭所有 Antigravity 进程后重新运行 `start.bat`。 |
+| Antigravity 更新后失效 | 检查部署文件，必要时重新安装；编辑器界面或 CDP 发生变化时，也可能需要更新集成代码。 |
 
----
+需要查看日志时，先停止已有预览服务，在仓库目录打开终端并执行：
 
-## License
+```sh
+node index.js
+```
+
+测试期间保持终端开启，按 `Ctrl+C` 停止。日志会显示预览资源目录、HTTP 监听地址、发现的 CDP 端口及连接的页面。预览服务默认监听 `127.0.0.1:12399`，可通过服务进程的环境变量 `OFFICE_VIEWER_PORT` 更改端口。
+
+## 卸载方法
+
+1. 退出 Antigravity，停止命令行包含 `office-viewer\index.js` 的 Node.js 预览进程，保留其他 Node.js 进程。
+2. 在 Antigravity 安装目录中删除本项目安装的 `winmm.dll` 和 `office-viewer/` 文件夹。如果安装前备份过其他 DLL，将其恢复。
+3. 正常启动 Antigravity。
+
+## 开发说明
+
+| 路径 | 用途 |
+| --- | --- |
+| `start.bat` | 定位 Antigravity，安装加载器、服务和预览资源 |
+| `index.js` | 本机 HTTP 服务、CDP 端口发现与预览界面集成 |
+| `bin/winmm.dll` | 预编译的 Windows x64 代理加载器 |
+| `src/loader/` | 加载器 C 源码、导出定义和编译脚本 |
+| `webview/` | 内置文档渲染器资源 |
+| `screenshots/` | README 使用的预览截图 |
+
+如需重新编译加载器，在 Windows 上将 x64 MinGW-w64 GCC 工具链加入 `PATH`，然后运行 `src\loader\build_dll.bat`，输出为 `bin\winmm.dll`。`webview/` 为已编译的前端资源，仓库目前未包含前端源码构建流程。
+
+## 致谢
+
+文档预览集成使用了 **vscode-office**（`cweijan.vscode-office`）的 webview 资源，感谢上游项目及贡献者。
+
+## 许可证
 
 MIT License © 2026 [Artriai](https://github.com/Artriai)
