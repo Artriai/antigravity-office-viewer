@@ -6,6 +6,8 @@ Preview Word, Excel, and PowerPoint files directly inside Google Antigravity.
 
 An unofficial Windows integration focused on document reading, with bundled preview assets and automatic background startup.
 
+Use it to inspect Office documents generated or processed in Antigravity without switching to another application. The integration focuses on previewing and reading; complex layouts may differ from Microsoft Office.
+
 [Screenshots](#screenshots) · [Features](#features) · [Installation](#installation) · [Troubleshooting](#troubleshooting) · [Uninstall](#uninstall) · [Development](#development)
 
 ## Screenshots
@@ -116,7 +118,17 @@ Run `npm test` for regression checks. GitHub Actions runs Windows and Linux chec
 
 ## Acknowledgments
 
-The preview integration uses webview assets from **vscode-office** (`cweijan.vscode-office`). Thanks to the upstream project and its contributors.
+The preview integration uses webview assets from [**vscode-office**](https://github.com/cweijan/vscode-office) ([`cweijan.vscode-office`](https://marketplace.visualstudio.com/items?itemName=cweijan.vscode-office)). Thanks to the upstream project and its contributors.
+
+### Preview asset provenance and source scope
+
+- This repository includes source for the local service, CDP integration, installation and management scripts, and Windows proxy loader.
+- `webview/` contains compiled preview assets. Upstream source and development instructions are available in the [vscode-office repository](https://github.com/cweijan/vscode-office#development-guide). This repository does not currently record the upstream version used for these assets or provide a complete workflow to rebuild them from frontend source. The current upstream version should not be assumed to match the bundled assets exactly.
+- This project's MIT declaration does not replace the license terms of third-party assets. Before using or redistributing them, check the licenses and dependency notices for the corresponding upstream version.
+
+## Community
+
+[LINUX DO](https://linux.do/) is a technology community. This project supports its values of sincerity, friendliness, solidarity, and professionalism. Community members are welcome to share their experience, and can also report issues or suggest features through [GitHub Issues](https://github.com/Artriai/antigravity-office-viewer/issues).
 
 ## License
 
