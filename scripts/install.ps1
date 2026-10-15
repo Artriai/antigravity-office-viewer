@@ -1,5 +1,8 @@
 param([string]$TargetDir)
 $ErrorActionPreference = 'Stop'
+# A caller running PowerShell 7 may pass a PSModulePath that omits Windows
+# PowerShell's built-in modules. Prefer the modules for this powershell.exe.
+$env:PSModulePath = (Join-Path $PSHOME 'Modules') + [IO.Path]::PathSeparator + $env:PSModulePath
 $source = Split-Path -Parent $PSScriptRoot
 $staging = $null
 $backup = $null
