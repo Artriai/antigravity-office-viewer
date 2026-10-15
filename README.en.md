@@ -23,7 +23,7 @@ Click an image to view it at full size.
 - **Multi-document switching** — Reuses each open document's preview frame to preserve its browsing state and reduce repeated rendering.
 - **Automatic startup** — A `winmm.dll` proxy loader launches the Node.js service alongside Antigravity, without patching `Antigravity.exe`.
 
-The main preview formats are `.docx`, `.xlsx`, and `.pptx`. The integration also recognizes `.dotx`, `.xlsm`, `.xls`, `.csv`, `.tsv`, `.ods`, `.ppt`, and `.pptm`; recognition does not guarantee rendering compatibility. Layout depends on the bundled renderer and document contents.
+The main preview formats are **`.docx`**, **`.xlsx`**, and **`.pptx`**. The integration also recognizes `.dotx`, `.xlsm`, `.xls`, `.csv`, `.tsv`, `.ods`, `.ppt`, and `.pptm`. Spreadsheets (`.xls`, `.csv`) offer good compatibility, whereas legacy binary formats like `.ppt` may fail to render due to frontend parser limitations. Legacy Word 97-2003 (`.doc`) binary files are currently not supported. Layout depends on the bundled renderer and document contents.
 
 ## Installation
 
@@ -68,6 +68,7 @@ The installer puts `winmm.dll` beside `Antigravity.exe` and copies `index.js`, `
 | `EADDRINUSE` | Default preview port `12399` is occupied. New services reuse an existing instance. If the error persists, check for a legacy viewer or another application using the port. |
 | Blank preview or `webview directory not found` | Verify `office-viewer/webview/index.html` and its `assets/` directory were copied completely. |
 | DLL copy warning | Close all Antigravity processes and rerun `start.bat`. |
+| `.doc` or `.ppt` displays mojibake or error | Legacy Word 97-2003 (`.doc`) and binary `.ppt` are not supported. Please save or convert them to `.docx` / `.pptx`. |
 | Stops working after an Antigravity update | Check the deployed files and reinstall if needed. Editor UI or CDP changes may require a code update. |
 
 For foreground diagnostics, stop the existing viewer service and run this from the repository directory:

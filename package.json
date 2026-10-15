@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "daemon": "node index.js --daemon",
-    "test": "node --test",
+    "test": "node --test \"test/*.test.js\"",
     "status": "node index.js --status",
     "stop": "node index.js --stop"
   },
