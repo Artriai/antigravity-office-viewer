@@ -6,6 +6,8 @@
 
 面向 Windows 的非官方集成工具，专注于文档阅读，内置预览资源，后台服务随 Antigravity 自动启动。
 
+适合在 Antigravity 中生成或处理 Office 文档后，直接在编辑区检查结果，减少切换到其他软件查看的步骤。当前主要提供预览和阅读能力，复杂文档的排版效果可能与 Microsoft Office 不同。
+
 [效果展示](#效果展示) · [功能特性](#功能特性) · [安装使用](#安装使用) · [常见问题](#常见问题) · [卸载方法](#卸载方法) · [开发说明](#开发说明)
 
 ## 效果展示
@@ -116,7 +118,17 @@ node index.js --stop
 
 ## 致谢
 
-文档预览集成使用了 **vscode-office**（`cweijan.vscode-office`）的 webview 资源，感谢上游项目及贡献者。
+文档预览集成使用了 [**vscode-office**](https://github.com/cweijan/vscode-office)（[`cweijan.vscode-office`](https://marketplace.visualstudio.com/items?itemName=cweijan.vscode-office)）的 webview 资源，感谢上游项目及贡献者。
+
+### 预览资源来源与源码范围
+
+- 本仓库包含本机服务、CDP 集成、安装与管理脚本，以及 Windows 代理加载器源码。
+- `webview/` 为内置的已编译预览资源；上游源码及开发说明见 [vscode-office 仓库](https://github.com/cweijan/vscode-office#development-guide)。本仓库目前未记录所用资源对应的上游版本，也未提供从前端源码重建这些资源的完整流程；上游当前版本不代表与本仓库资源完全一致。
+- 本项目的 MIT 声明不替代第三方资源各自的许可条件；使用或再分发相关资源时，请核对对应上游版本的许可证和依赖声明。
+
+## 社区
+
+[LINUX DO](https://linux.do/) 是一个技术交流社区。本项目认可社区「真诚、友善、团结、专业」的理念，欢迎佬友交流使用体验；问题反馈和功能建议也可提交到 [GitHub Issues](https://github.com/Artriai/antigravity-office-viewer/issues)。
 
 ## 许可证
 
